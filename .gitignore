@@ -14,3 +14,7 @@ motions/
 artifacts/
 .venv/
 render_robots.py
+
+# Doc Outputs
+**/docs/_build/*
+**/generated/*

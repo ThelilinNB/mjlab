@@ -1,0 +1,141 @@
+.. _migration_guide:
+
+Migration from Isaac Lab
+========================
+
+
+**🚧 Work in Progress:** This guide is actively being improved as more users onboard and find issues. If something isn't covered here, please `open an issue <https://github.com/mujocolab/mjlab/issues>`_ or `start a discussion <https://github.com/mujocolab/mjlab/discussions>`_. Your questions help us improve the docs!
+
+
+TL;DR
+-----
+
+Most Isaac Lab task configs work in mjlab with only minor tweaks! The manager-based API is nearly identical; just a few syntax changes.
+
+Key Differences
+---------------
+
+Import Paths
+^^^^^^^^^^^^
+
++--------------------------------------------------------------+-------------------------------------------------------------------+
+|                                                              |                                                                   |
+|.. code-block:: python                                        |.. code-block:: python                                             |
+|                                                              |                                                                   |
+|  # Isaac Lab                                                 |  # MjLab                                                          |
+|  from isaaclab.envs import ManagerBasedRLEnv                 |  from mjlab.envs import ManagerBasedRlEnvCfg                      |
+|                                                              |                                                                   |
++--------------------------------------------------------------+-------------------------------------------------------------------+
+
+**Note:** We use consistent `CamelCase` naming conventions (e.g., `RlEnv` instead of `RLEnv`).
+
+Configuration Classes
+^^^^^^^^^^^^^^^^^^^^^
+
+Isaac Lab uses `@configclass`, mjlab uses Python's standard `@dataclass` with a `term()` helper.
+
++---------------------------------------------------------------+-------------------------------------------------------------------+
+|                                                               |                                                                   |
+|.. code-block:: python                                         |.. code-block:: python                                             |
+|                                                               |                                                                   |
+|  # Isaac Lab                                                  |  # MjLab                                                          |
+|  @configclass                                                 |  @dataclass                                                       |
+|  class RewardsCfg:                                            |  class RewardCfg:                                                 |
+|      """Reward terms for the MDP."""                          |      motion_global_root_pos: RewTerm = term(                      |
+|                                                               |          RewTerm,                                                 |
+|      motion_global_anchor_pos = RewTerm(                      |          func=mdp.motion_global_anchor_position_error_exp,        |
+|          func=mdp.motion_global_anchor_position_error_exp,    |          weight=0.5,                                              |
+|          weight=0.5,                                          |          params={"command_name": "motion", "std": 0.3},           |
+|          params={"command_name": "motion", "std": 0.3},       |      )                                                            |
+|      )                                                        |      motion_global_root_ori: RewTerm = term(                      |
+|      motion_global_anchor_ori = RewTerm(                      |          RewTerm,                                                 |
+|          func=mdp.motion_global_anchor_orientation_error_exp, |          func=mdp.motion_global_anchor_orientation_error_exp,     |
+|          weight=0.5,                                          |          weight=0.5,                                              |
+|          params={"command_name": "motion", "std": 0.4},       |          params={"command_name": "motion", "std": 0.4},           |
+|                                                               |      )                                                            |
+|      )                                                        |                                                                   |
+|                                                               |                                                                   |
++---------------------------------------------------------------+-------------------------------------------------------------------+
+
+Scene Configuration
+^^^^^^^^^^^^^^^^^^^
+
+Scene setup is more streamlined in mjlab—no Omniverse/USD scene graphs. Instead, you configure materials, lights, and textures directly through MuJoCo's MjSpec modifiers.
+
++--------------------------------------------------------------------------------------------+---------------------------------------------------------------------------+
+|                                                                                            |                                                                           |
+|.. code-block:: python                                                                      |.. code-block:: python                                                     |
+|                                                                                            |                                                                           |
+|  # Isaac Lab                                                                               |  # MjLab                                                                  |
+|  from whole_body_tracking.robots.g1 import G1_ACTION_SCALE, G1_CYLINDER_CFG                |  from mjlab.scene import SceneCfg                                         |
+|  from isaaclab.scene import InteractiveSceneCfg                                            |  from mjlab.asset_zoo.robots.unitree_g1.g1_constants import G1_ROBOT_CFG  |
+|  from isaaclab.sensors import ContactSensorCfg                                             |  from mjlab.utils.spec_config import ContactSensorCfg                     |
+|  from isaaclab.terrains import TerrainImporterCfg                                          |  from mjlab.terrains import TerrainImporterCfg                            |
+|  import isaaclab.sim as sim_utils                                                          |                                                                           |
+|  from isaaclab.assets import ArticulationCfg, AssetBaseCfg                                 |  # Configure contact sensor                                               |
+|                                                                                            |  self_collision_sensor = ContactSensorCfg(                                |
+|  @configclass                                                                              |      name="self_collision",                                               |
+|  class MySceneCfg(InteractiveSceneCfg):                                                    |      subtree1="pelvis",                                                   |
+|      """Configuration for the terrain scene with a legged robot."""                        |      subtree2="pelvis",                                                   |
+|                                                                                            |      data=("found",),                                                     |
+|      # ground terrain                                                                      |      reduce="netforce",                                                   |
+|      terrain = TerrainImporterCfg(                                                         |      num=10,  # Report up to 10 contacts                                  |
+|          prim_path="/World/ground",                                                        |  )                                                                        |
+|          terrain_type="plane",                                                             |                                                                           |
+|          collision_group=-1,                                                               |  # Add sensor to robot config                                             |
+|          physics_material=sim_utils.RigidBodyMaterialCfg(                                  |  g1_cfg = replace(G1_ROBOT_CFG, sensors=(self_collision_sensor,))         |
+|              friction_combine_mode="multiply",                                             |                                                                           |
+|              restitution_combine_mode="multiply",                                          |  # Create scene                                                           |
+|              static_friction=1.0,                                                          |  SCENE_CFG = SceneCfg(                                                    |
+|              dynamic_friction=1.0,                                                         |      terrain=TerrainImporterCfg(terrain_type="plane"),                    |
+|          ),                                                                                |      entities={"robot": g1_cfg}                                           |
+|          visual_material=sim_utils.MdlFileCfg(                                             |  )                                                                        |
+|              mdl_path="{NVIDIA_NUCLEUS_DIR}/Materials/Base/Architecture/Shingles_01.mdl",  |                                                                           |
+|              project_uvw=True,                                                             |                                                                           |
+|          ),                                                                                |                                                                           |
+|      )                                                                                     |                                                                           |
+|      # lights                                                                              |                                                                           |
+|      light = AssetBaseCfg(                                                                 |                                                                           |
+|          prim_path="/World/light",                                                         |                                                                           |
+|          spawn=sim_utils.DistantLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0),      |                                                                           |
+|      )                                                                                     |                                                                           |
+|      sky_light = AssetBaseCfg(                                                             |                                                                           |
+|          prim_path="/World/skyLight",                                                      |                                                                           |
+|          spawn=sim_utils.DomeLightCfg(color=(0.13, 0.13, 0.13), intensity=1000.0),         |                                                                           |
+|      )                                                                                     |                                                                           |
+|      robot = G1_CYLINDER_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")                     |                                                                           |
+|                                                                                            |                                                                           |
+|                                                                                            |                                                                           |
++--------------------------------------------------------------------------------------------+---------------------------------------------------------------------------+
+
+
+Key changes:
+^^^^^^^^^^^^
+
+- No USD scene graph or `prim_path` management
+- Materials, lights, and textures configured via MuJoCo's MjSpec. See our `spec_config.py <https://github.com/mujocolab/mjlab/blob/main/src/mjlab/utils/spec_config.py>`_ for dataclass-based modifiers that handle MjSpec changes for you.
+
+Complete Example Comparison
+---------------------------
+
+Everything else—rewards, observations, commands, terminations—works almost identically!
+
+**Isaac Lab implementation** (Beyond Mimic):  
+https://github.com/HybridRobotics/whole_body_tracking/blob/main/source/whole_body_tracking/whole_body_tracking/tasks/tracking/tracking_env_cfg.py
+
+**mjlab implementation**:  
+https://github.com/mujocolab/mjlab/blob/main/src/mjlab/tasks/tracking/tracking_env_cfg.py
+
+Compare these to see how similar the APIs are in practice.
+
+Tips for Migration
+------------------
+
+1. **Check the examples** - Look at our reference tasks in `src/mjlab/tasks/`
+2. **Ask questions** - `Open a discussion <https://github.com/mujocolab/mjlab/discussions>`_ if you get stuck
+3. **MuJoCo differences** - Some Isaac Sim features (fancy rendering, USD workflows) don't have direct equivalents
+
+Need Help?
+----------
+
+If something in your Isaac Lab config doesn't translate cleanly, please `open an issue <https://github.com/mujocolab/mjlab/issues>`_ or `start a discussion <https://github.com/mujocolab/mjlab/discussions>`_. We're actively improving migration support!

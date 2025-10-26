@@ -40,3 +40,7 @@ build:
 	uv run --isolated --no-project --with dist/*.whl --with git+https://github.com/google-deepmind/mujoco_warp tests/smoke_test.py
 	uv run --isolated --no-project --with dist/*.tar.gz --with git+https://github.com/google-deepmind/mujoco_warp tests/smoke_test.py
 	@echo "Build and import test successful"
+
+.PHONY: docs
+docs:
+	@sphinx-build "docs" "docs/_build/current"
