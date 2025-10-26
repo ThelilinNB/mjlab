@@ -43,4 +43,4 @@ build:
 
 .PHONY: docs
 docs:
-	@sphinx-build "docs_web" "docs_web/_build/current"
+	uv run --no-default-groups --group docs sphinx-build docs_web docs_web/_build

@@ -63,4 +63,4 @@ jobs:
           enable-cache: true
           version: "0.8.13"
       - name: Test with python ${{ matrix.python-version }}
-        run: uv run --no-default-groups --group cpu --group dev pyright
+        run: uv run --no-default-groups --group cpu --group dev --group docs pyright
