@@ -171,10 +171,10 @@ class EventCfg:
   )
   reset_robot_joints: EventTerm = term(
     EventTerm,
-    func=mdp.reset_joints_by_scale,
+    func=mdp.reset_joints_by_offset,
     mode="reset",
     params={
-      "position_range": (1.0, 1.0),
+      "position_range": (0.0, 0.0),
       "velocity_range": (0.0, 0.0),
       "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
     },
@@ -356,18 +356,6 @@ class CurriculumCfg:
         {"step": 0, "lin_vel_x": (-1.0, 1.0), "ang_vel_z": (-0.5, 0.5)},
         {"step": 5000 * 24, "lin_vel_x": (-1.5, 2.0), "ang_vel_z": (-0.7, 0.7)},
         {"step": 10000 * 24, "lin_vel_x": (-2.0, 3.0)},
-      ],
-    },
-  )
-
-  soft_landing_weight: CurrTerm | None = term(
-    CurrTerm,
-    func=mdp.reward_weight,
-    params={
-      "reward_name": "soft_landing",
-      "weight_stages": [
-        {"step": 0, "weight": -1e-5},
-        {"step": 2000 * 24, "weight": -0.02},
       ],
     },
   )
