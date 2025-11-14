@@ -3,8 +3,8 @@
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.rl import RslRlOnPolicyRunnerCfg
 
-# Private module-level registry: task_id -> (env_cfg, rl_cfg)
-EnvRlCfgPair = tuple[ManagerBasedRlEnvCfg, RslRlOnPolicyRunnerCfg]
+# Private module-level registry: task_id -> (env_cfg, rl_cfg, runner_cls)
+EnvRlCfgPair = tuple[ManagerBasedRlEnvCfg, RslRlOnPolicyRunnerCfg, type | None]
 _REGISTRY: dict[str, EnvRlCfgPair] = {}
 
 
@@ -12,6 +12,7 @@ def register_mjlab_task(
   task_id: str,
   env_cfg: ManagerBasedRlEnvCfg,
   rl_cfg: RslRlOnPolicyRunnerCfg,
+  runner_cls: type | None = None,
 ) -> None:
   """Register an environment task.
 
@@ -19,10 +20,11 @@ def register_mjlab_task(
       task_id: Unique task identifier (e.g., "Mjlab-Velocity-Rough-Unitree-Go1").
       env_cfg: Environment configuration (instance or callable that returns one).
       rl_cfg: RL runner configuration.
+      runner_cls: Optional custom runner class. If None, uses OnPolicyRunner.
   """
   if task_id in _REGISTRY:
     raise ValueError(f"Task '{task_id}' is already registered")
-  _REGISTRY[task_id] = (env_cfg, rl_cfg)
+  _REGISTRY[task_id] = (env_cfg, rl_cfg, runner_cls)
 
 
 def list_tasks() -> list[str]:
@@ -43,7 +45,7 @@ def load_env_cfg(task_name: str) -> ManagerBasedRlEnvCfg:
   Returns:
       Environment configuration.
   """
-  env_cfg, _ = _REGISTRY[task_name]
+  env_cfg, _, _ = _REGISTRY[task_name]
 
   if callable(env_cfg):
     return env_cfg()
@@ -59,5 +61,18 @@ def load_rl_cfg(task_name: str) -> RslRlOnPolicyRunnerCfg:
   Returns:
       RL runner configuration.
   """
-  _, rl_cfg = _REGISTRY[task_name]
+  _, rl_cfg, _ = _REGISTRY[task_name]
   return rl_cfg
+
+
+def load_runner_cls(task_name: str) -> type | None:
+  """Load the runner class for a task.
+
+  Args:
+      task_name: Task identifier.
+
+  Returns:
+      The runner class for the task, or None if using default OnPolicyRunner.
+  """
+  _, _, runner_cls = _REGISTRY[task_name]
+  return runner_cls
