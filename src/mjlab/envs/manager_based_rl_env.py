@@ -274,7 +274,7 @@ class ManagerBasedRlEnv:
     self._reset_idx(env_ids)
     self.scene.write_data_to_sim()
     self.sim.forward()
-    self.scene.render()  # Render cameras after forward
+    self.scene.render()
     self.obs_buf = self.observation_manager.compute(update_history=True)
     return self.obs_buf, self.extras
 
@@ -313,7 +313,7 @@ class ManagerBasedRlEnv:
       self._reset_idx(reset_env_ids)
       self.scene.write_data_to_sim()
       self.sim.forward()
-      self.scene.render()  # Render cameras after forward
+      self.scene.render()
 
     self.command_manager.compute(dt=self.step_dt)
 

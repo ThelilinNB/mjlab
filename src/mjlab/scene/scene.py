@@ -129,7 +129,6 @@ class Scene:
     for sensor in self._sensors.values():
       sensor.initialize(mj_model, model, data, self._device)
 
-    # Initialize render manager if any camera sensors exist
     camera_sensors = [s for s in self._sensors.values() if isinstance(s, CameraSensor)]
     if camera_sensors:
       self._render_manager = RenderManager(mj_model, model, data, camera_sensors)
@@ -146,11 +145,9 @@ class Scene:
     for sensor in self._sensors.values():
       sensor.update(dt)
 
-    # Render all cameras once
     self.render()
 
   def render(self) -> None:
-    """Render all cameras (if render manager exists)."""
     if self._render_manager is not None:
       self._render_manager.render()
 

@@ -7,7 +7,7 @@ from mjlab.asset_zoo.robots import (
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.manager_term_config import ObservationGroupCfg
-from mjlab.sensor import ContactMatch, ContactSensorCfg
+from mjlab.sensor import CameraSensorCfg, ContactMatch, ContactSensorCfg
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
 
@@ -96,5 +96,56 @@ def unitree_g1_flat_tracking_env_cfg(
     motion_cmd.velocity_range = {}
 
     motion_cmd.sampling_mode = "start"
+
+  # 16:9 aspect ratio camera.
+  # Let's use a width of 256.
+  width = 256
+  height = int(width * 9 / 16)
+  camera_cfg = CameraSensorCfg(
+    name="tracking_camera",
+    camera_name="robot/depth",  # Use existing camera in g1.xml (robot entity prepends)
+    width=width,
+    height=height,
+    type=(
+      "rgb",
+      "depth",
+    ),
+    update_period=0.033,  # ~30 Hz (physics_dt=0.005 means 200 Hz sim)
+  )
+  cfg.scene.sensors = cfg.scene.sensors + (camera_cfg,)
+
+  return cfg
+
+
+def unitree_g1_flat_tracking_env_cfg_with_camera(
+  has_state_estimation: bool = True,
+  play: bool = False,
+) -> ManagerBasedRlEnvCfg:
+  """Create Unitree G1 flat terrain tracking configuration with camera sensor."""
+  cfg = unitree_g1_flat_tracking_env_cfg(
+    has_state_estimation=has_state_estimation, play=play
+  )
+
+  # 16:9 aspect ratio camera.
+  width = 256
+  height = int(width * 9 / 16)
+  update_period = 1.0 / 30.0  # 30 Hz
+  camera_cfg = CameraSensorCfg(
+    name="tracking_camera",
+    camera_name="robot/depth",
+    width=width,
+    height=height,
+    type=(
+      "rgb",
+      "depth",
+    ),
+    update_period=update_period,
+  )
+  cfg.scene.sensors = cfg.scene.sensors + (camera_cfg,)
+
+  assert cfg.commands is not None
+  motion_cmd = cfg.commands["motion"]
+  assert isinstance(motion_cmd, MotionCommandCfg)
+  motion_cmd.sampling_mode = "uniform"
 
   return cfg

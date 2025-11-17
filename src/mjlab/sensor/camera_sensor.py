@@ -9,7 +9,6 @@ import torch
 
 from mjlab.entity import Entity
 from mjlab.sensor.sensor import Sensor, SensorCfg
-from mjlab.sim.sim_data import TorchArray
 
 if TYPE_CHECKING:
   from mjlab.sensor.render_manager import RenderManager
@@ -18,52 +17,17 @@ CameraDataType = Literal["rgb", "depth"]
 
 
 @dataclass
-class CameraSpec:
-  """Specification for creating a new camera."""
-
-  name: str
-  """Name of the camera."""
-
-  pos: tuple[float, float, float] = (0.0, 0.0, 1.0)
-  """Position of the camera in world coordinates."""
-
-  quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
-  """Orientation quaternion (w, x, y, z)."""
-
-  fovy: float = 45.0
-  """Vertical field of view in degrees."""
-
-  ipd: float = 0.068
-  """Inter-pupillary distance for stereo rendering."""
-
-
-@dataclass
 class CameraSensorCfg(SensorCfg):
-  """Configuration for a camera sensor (one sensor per camera)."""
-
-  # Camera identification (exactly one must be specified)
   camera_name: str | None = None
-  """Name of existing camera in XML to wrap."""
-
-  camera_spec: CameraSpec | None = None
-  """Spec for creating a new camera via edit_spec."""
-
-  width: int = 640
-  height: int = 480
-
-  # Output types
+  pos: tuple[float, float, float] = (0.0, 0.0, 1.0)
+  quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
+  fovy: float = 45
+  width: int = 160
+  height: int = 120
   type: tuple[CameraDataType, ...] = ("rgb",)
-
-  # Rendering options (shared across all cameras via RenderManager)
   use_textures: bool = True
   use_shadows: bool = False
   enabled_geom_groups: tuple[int, ...] = (0, 1, 2)
-
-  def __post_init__(self) -> None:
-    if self.camera_name is None and self.camera_spec is None:
-      raise ValueError("Must specify either camera_name or camera_spec")
-    if self.camera_name is not None and self.camera_spec is not None:
-      raise ValueError("Cannot specify both camera_name and camera_spec")
 
   def build(self) -> CameraSensor:
     return CameraSensor(self)
@@ -71,133 +35,109 @@ class CameraSensorCfg(SensorCfg):
 
 @dataclass
 class CameraSensorData:
-  """Data structure for camera sensor data."""
+  """Camera sensor output data.
 
-  output: dict[str, dict[str, torch.Tensor | TorchArray]]
-  """Structure: {camera_name: {"rgb": tensor, "depth": tensor}}"""
+  Contains RGB and/or depth images based on sensor configuration.
+  Both fields are None if not requested in the sensor's type configuration.
+
+  Shape: [num_envs, height, width, channels]
+    - rgb: channels=3 (uint8)
+    - depth: channels=1 (float32)
+  """
+
+  rgb: torch.Tensor | None = None
+  """RGB image data [num_envs, height, width, 3] (uint8), or None if not enabled."""
+  depth: torch.Tensor | None = None
+  """Depth image data [num_envs, height, width, 1] (float32), or None if not enabled."""
 
 
 class CameraSensor(Sensor[CameraSensorData]):
-  """Camera sensor for a single camera."""
-
   def __init__(self, cfg: CameraSensorCfg) -> None:
+    super().__init__(cfg.update_period)
     self.cfg = cfg
+    self._camera_name = cfg.camera_name if cfg.camera_name is not None else cfg.name
+    self._is_wrapping_existing = cfg.camera_name is not None
     self._render_manager: RenderManager | None = None
     self._camera_idx: int = -1
-    self._camera_name: str = ""
+
+  @property
+  def camera_name(self) -> str:
+    """The name of the MuJoCo camera this sensor wraps."""
+    return self._camera_name
+
+  @property
+  def camera_idx(self) -> int:
+    """The MuJoCo camera ID (index in the compiled model)."""
+    return self._camera_idx
 
   def edit_spec(self, scene_spec: mujoco.MjSpec, entities: dict[str, Entity]) -> None:
-    """Add camera to spec if configured."""
-    if self.cfg.camera_spec is not None:
-      spec = self.cfg.camera_spec
-      scene_spec.worldbody.add_camera(
-        name=spec.name,
-        pos=spec.pos,
-        quat=spec.quat,
-        fovy=spec.fovy,
-        ipd=spec.ipd,
-      )
+    del entities
+
+    # nuser_cam is set to 1 in scene.xml to ensure all cameras have user data allocated.
+
+    if self._is_wrapping_existing:
+      return
+
+    scene_spec.worldbody.add_camera(
+      name=self.cfg.name,
+      pos=self.cfg.pos,
+      quat=self.cfg.quat,
+      fovy=self.cfg.fovy,
+      userdata=[1.0],
+    )
 
   def initialize(
     self, mj_model: mujoco.MjModel, model: mjwarp.Model, data: mjwarp.Data, device: str
   ) -> None:
-    """Find the camera index."""
-    # Determine which camera to use
-    if self.cfg.camera_spec is not None:
-      target_name = self.cfg.camera_spec.name
-    elif self.cfg.camera_name is not None:
-      target_name = self.cfg.camera_name
-    else:
-      raise ValueError(
-        f"CameraSensor '{self.cfg.name}' must specify either camera_name or camera_spec"
-      )
+    """Initialize the camera sensor after model compilation.
 
-    # Find camera index using mj_model.camera()
+    This resolves the camera name to its MuJoCo ID and enables it for rendering
+    by setting cam_user[0] = 1.0.
+
+    Design note: cam_user[0] acts as an enable/disable flag for cameras in the
+    render context. The RenderManager creates a render context for ALL cameras
+    with cam_user[0] == 1.0, then uses render_rgb/render_depth flags to control
+    which cameras actually render on each frame based on their update_period.
+    """
+    del model, data, device
+
     try:
-      self._camera_idx = mj_model.camera(target_name).id
-      self._camera_name = target_name
+      cam = mj_model.camera(self._camera_name)
+      self._camera_idx = cam.id
+
+      # Ensure camera has user data allocated (should be set in scene.xml).
+      if mj_model.cam_user.shape[1] == 0:
+        raise ValueError(
+          f"Camera '{self._camera_name}' requires user data, but nuser_cam=0. "
+          "This should not happen - nuser_cam=1 is set in scene.xml."
+        )
+
+      # Enable camera for the render context (cam_user[0] = 1.0 means "include me").
+      # For wrapped cameras, this overrides whatever was in the XML.
+      # For new cameras, this was already set in edit_spec.
+      mj_model.cam_user[self._camera_idx, 0] = 1.0
     except KeyError as e:
       available = [mj_model.cam(i).name for i in range(mj_model.ncam)]
       raise ValueError(
-        f"Camera '{target_name}' not found in model. Available cameras: {available}"
+        f"Camera '{self._camera_name}' not found in model. Available: {available}"
       ) from e
 
   def set_render_manager(self, render_manager: RenderManager) -> None:
-    """Called by Scene after creating RenderManager."""
     self._render_manager = render_manager
 
-  @property
-  def data(self) -> CameraSensorData:
-    """Read this camera's data from RenderManager."""
-    assert self._render_manager is not None, "RenderManager not set"
+  def _read(self) -> CameraSensorData:
+    if self._render_manager is None:
+      raise RuntimeError(
+        f"Camera sensor '{self.cfg.name}' has not been initialized with a RenderManager. "
+        "This should be set automatically during scene initialization."
+      )
 
-    cam_output: dict[str, torch.Tensor | TorchArray] = {}
+    rgb_data = None
+    depth_data = None
 
     if "rgb" in self.cfg.type:
-      cam_output["rgb"] = self._render_manager.get_rgb(self._camera_idx)
-
+      rgb_data = self._render_manager.get_rgb(self._camera_idx)
     if "depth" in self.cfg.type:
-      cam_output["depth"] = self._render_manager.get_depth(self._camera_idx)
+      depth_data = self._render_manager.get_depth(self._camera_idx)
 
-    # Return data for single camera
-    return CameraSensorData(output={self._camera_name: cam_output})
-
-
-# if __name__ == "__main__":
-#   # Test camera sensor with new API
-#   camera_cfg = CameraSensorCfg(
-#     name="test",
-#     camera_name="robot/tracking",  # Use existing camera in XML
-#     width=640,
-#     height=480,
-#     type=("rgb", "depth"),
-#   )
-
-#   from mjlab.tasks.tracking.config.g1 import unitree_g1_flat_tracking_env_cfg
-
-#   cfg = unitree_g1_flat_tracking_env_cfg()
-
-#   cfg.scene.sensors = cfg.scene.sensors + (camera_cfg,)
-
-#   from mjlab.tasks.tracking.mdp import MotionCommandCfg
-
-#   assert cfg.commands is not None
-#   motion_cmd = cfg.commands["motion"]
-#   assert isinstance(motion_cmd, MotionCommandCfg)
-#   motion_cmd.motion_file = "artifacts/lafan_cartwheel:v0/motion.npz"
-
-#   from mjlab.envs import ManagerBasedRlEnv
-
-#   env = ManagerBasedRlEnv(cfg, device="cuda:0")
-#   obs, _ = env.reset()
-
-#   # Access camera data (renders have already been done in reset)
-#   camera: CameraSensor = env.scene["test"]
-#   data = camera.data
-
-#   rgb = data.output["robot/tracking"]["rgb"]
-#   depth = data.output["robot/tracking"]["depth"]
-
-#   # Save rgb and depth to disk.
-#   import numpy as np
-#   from PIL import Image
-
-#   # Convert to numpy and take first world
-#   rgb_np = rgb[0].cpu().numpy().astype(np.uint8)
-#   depth_np = depth[0].cpu().numpy().squeeze()
-
-#   # Save RGB image
-#   rgb_img = Image.fromarray(rgb_np)
-#   rgb_img.save("camera_rgb.png")
-#   print(f"Saved RGB image to camera_rgb.png (shape: {rgb_np.shape})")
-
-#   # Normalize and save depth image (using fixed scale like mujoco_warp reference)
-#   depth_scale = 5.0  # meters - adjust based on your scene scale
-#   depth_normalized = np.clip(depth_np / depth_scale, 0.0, 1.0)
-#   depth_img = Image.fromarray((depth_normalized * 255).astype(np.uint8))
-#   depth_img.save("camera_depth.png")
-#   print(f"Saved depth image to camera_depth.png (shape: {depth_np.shape})")
-#   print(f"Depth range: [{depth_np.min():.3f}, {depth_np.max():.3f}]")
-#   print(
-#     f"Depth visualization scale: {depth_scale}m (values > {depth_scale}m clipped to white)"
-#   )
+    return CameraSensorData(rgb=rgb_data, depth=depth_data)

@@ -10,8 +10,10 @@ from concurrent.futures import ThreadPoolExecutor
 import viser
 from typing_extensions import override
 
+from mjlab.sensor.camera_sensor import CameraSensor
 from mjlab.sim.sim import Simulation
 from mjlab.viewer.base import BaseViewer, EnvProtocol, PolicyProtocol, VerbosityLevel
+from mjlab.viewer.viser_camera_viewer import ViserCameraViewer
 from mjlab.viewer.viser_reward_plotter import ViserRewardPlotter
 from mjlab.viewer.viser_scene import ViserMujocoScene
 
@@ -28,6 +30,7 @@ class ViserPlayViewer(BaseViewer):
   ) -> None:
     super().__init__(env, policy, frame_rate, verbosity)
     self._reward_plotter: ViserRewardPlotter | None = None
+    self._camera_viewer: ViserCameraViewer | None = None
 
   @override
   def setup(self) -> None:
@@ -40,7 +43,7 @@ class ViserPlayViewer(BaseViewer):
     self._counter = 0
     self._needs_update = False
 
-    # Create ViserMujocoScene for all 3D visualization (with debug visualization enabled).
+    # Create ViserMujocoScene for all 3D visualization.
     self._scene = ViserMujocoScene.create(
       server=self._server,
       mj_model=sim.mj_model,
@@ -102,7 +105,7 @@ class ViserPlayViewer(BaseViewer):
             self.increase_speed()
           self._update_status_display()
 
-      # Add standard visualization options from ViserMujocoScene (Environment, Visualization, Contacts, Camera Tracking, Debug Visualization).
+      # Add standard visualization options from ViserMujocoScene.
       self._scene.create_visualization_gui(
         camera_distance=self.cfg.distance,
         camera_azimuth=self.cfg.azimuth,
@@ -122,6 +125,17 @@ class ViserPlayViewer(BaseViewer):
           )
         ]
         self._reward_plotter = ViserRewardPlotter(self._server, term_names)
+
+    # Camera tab - check if there's a camera sensor
+    camera_sensor = None
+    for sensor in self.env.unwrapped.scene.sensors.values():
+      if isinstance(sensor, CameraSensor):
+        camera_sensor = sensor
+        break
+
+    if camera_sensor is not None:
+      with tabs.add_tab("Camera", icon=viser.Icon.CAMERA):
+        self._camera_viewer = ViserCameraViewer(self._server, camera_sensor)
 
     # Geom groups tab.
     self._scene.create_geom_groups_gui(tabs)
@@ -149,6 +163,10 @@ class ViserPlayViewer(BaseViewer):
           )
         )
         self._reward_plotter.update(terms)
+
+    # Update camera images (sensor update_period handles rate limiting)
+    if self._camera_viewer is not None and not self._is_paused:
+      self._camera_viewer.update(self._scene.env_idx)
 
     # Update debug visualizations if enabled
     if self._scene.debug_visualization_enabled and hasattr(
@@ -187,6 +205,8 @@ class ViserPlayViewer(BaseViewer):
     """Close the viewer and cleanup resources."""
     if self._reward_plotter:
       self._reward_plotter.cleanup()
+    if self._camera_viewer:
+      self._camera_viewer.cleanup()
     self._threadpool.shutdown(wait=True)
     self._server.stop()
 

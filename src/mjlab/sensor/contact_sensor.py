@@ -96,6 +96,9 @@ class ContactSensorCfg(SensorCfg):
   global_frame: bool = False
   debug: bool = False
 
+  def __post_init__(self) -> None:
+    pass
+
   def build(self) -> ContactSensor:
     return ContactSensor(self)
 
@@ -154,6 +157,7 @@ class ContactSensor(Sensor[ContactData]):
   """Tracks contacts with automatic pattern expansion to multiple MuJoCo sensors."""
 
   def __init__(self, cfg: ContactSensorCfg) -> None:
+    super().__init__(cfg.update_period)
     self.cfg = cfg
 
     if cfg.global_frame and cfg.reduce != "netforce":
@@ -227,8 +231,8 @@ class ContactSensor(Sensor[ContactData]):
         last_time=torch.zeros((n_envs,), device=device),
       )
 
-  @property
-  def data(self) -> ContactData:
+  def _read(self) -> ContactData:
+    """Read fresh contact sensor data."""
     out = self._extract_sensor_data()
     if self._air_time_state is not None:
       out.current_air_time = self._air_time_state.current_air_time
@@ -237,7 +241,7 @@ class ContactSensor(Sensor[ContactData]):
       out.last_contact_time = self._air_time_state.last_contact_time
     return out
 
-  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+  def _on_reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
     if self._air_time_state is None:
       return
 
@@ -252,8 +256,7 @@ class ContactSensor(Sensor[ContactData]):
     if self._data is not None:
       self._air_time_state.last_time[env_ids] = self._data.time[env_ids]
 
-  def update(self, dt: float) -> None:
-    del dt  # Unused.
+  def _on_update(self, dt: float) -> None:
     if self._air_time_state is not None:
       self._update_air_time_tracking()
 
