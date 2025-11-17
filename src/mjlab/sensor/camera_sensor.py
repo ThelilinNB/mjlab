@@ -48,7 +48,6 @@ class CameraSensorCfg(SensorCfg):
   camera_spec: CameraSpec | None = None
   """Spec for creating a new camera via edit_spec."""
 
-  # Resolution (must match across all camera sensors in scene)
   width: int = 640
   height: int = 480
 
@@ -57,7 +56,7 @@ class CameraSensorCfg(SensorCfg):
 
   # Rendering options (shared across all cameras via RenderManager)
   use_textures: bool = True
-  use_shadows: bool = True
+  use_shadows: bool = False
   enabled_geom_groups: tuple[int, ...] = (0, 1, 2)
 
   def __post_init__(self) -> None:
