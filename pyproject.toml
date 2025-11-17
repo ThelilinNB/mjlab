@@ -103,7 +103,8 @@ url = "https://py.mujoco.org"
 explicit = true
 
 [tool.uv.sources]
-warp-lang = { path = "../warp", editable = true }
+# warp-lang = { path = "../warp", editable = true }
+warp-lang = { index = "nvidia", marker = "sys_platform != 'darwin'" }
 mujoco = { index = "mujoco" }
 torch = { index = "pytorch-cu128", extra = "cu128", marker = "sys_platform != 'darwin'" }
 mujoco-warp = { path = "../mujoco_warp", editable = true }
