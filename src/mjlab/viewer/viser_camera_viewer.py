@@ -56,9 +56,18 @@ class ViserCameraViewer:
   def update(self, env_idx: int = 0) -> None:
     """Update the camera images for a single environment.
 
+    Only updates viser when sensor has new data to avoid expensive GPU->CPU
+    transfers and JPEG encoding.
+
     Args:
       env_idx: Environment index to visualize
     """
+    will_read_fresh = (
+      self._camera_sensor._update_period == 0.0 or self._camera_sensor._is_outdated
+    )
+    if not will_read_fresh:
+      return
+
     data = self._camera_sensor.data
 
     if self._has_rgb and self._rgb_handle is not None and data.rgb is not None:
