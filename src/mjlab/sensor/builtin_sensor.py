@@ -274,10 +274,12 @@ class BuiltinSensor(Sensor[torch.Tensor]):
     self, cfg: BuiltinSensorCfg | None = None, name: str | None = None
   ) -> None:
     if cfg is not None:
+      super().__init__(cfg.update_period)
       self._name = cfg.name
       self.cfg: BuiltinSensorCfg | None = cfg
     else:
       assert name is not None, "Must provide either cfg or name"
+      super().__init__(0.0)
       self._name = name
       self.cfg = None
     self._data: mjwarp.Data | None = None
@@ -334,7 +336,6 @@ class BuiltinSensor(Sensor[torch.Tensor]):
     dim = sensor.dim[0]
     self._data_view = self._data.sensordata[:, start : start + dim]
 
-  @property
-  def data(self) -> torch.Tensor:
+  def _read(self) -> torch.Tensor:
     assert self._data_view is not None
     return self._data_view

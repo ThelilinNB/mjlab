@@ -354,3 +354,59 @@ def test_cutoff_parameter(articulated_robot_xml, device):
 
   sensor = sim.mj_model.sensor("robot/joint1_pos")
   assert sensor.cutoff[0] == 0.01
+
+
+def test_sensor_update_period_caching(articulated_robot_xml, device):
+  """Verify sensor update_period controls when _read() is called."""
+  entity_cfg = EntityCfg(
+    spec_fn=lambda: mujoco.MjSpec.from_string(articulated_robot_xml)
+  )
+
+  # Create sensor with 0.1s update period (sim dt = 0.002, so ~50 steps).
+  sensor_cfg = BuiltinSensorCfg(
+    name="joint1_pos",
+    sensor_type="jointpos",
+    obj=ObjRef(type="joint", name="joint1", entity="robot"),
+    update_period=0.1,
+  )
+
+  scene_cfg = SceneCfg(
+    num_envs=1,
+    env_spacing=3.0,
+    entities={"robot": entity_cfg},
+    sensors=(sensor_cfg,),
+  )
+
+  scene = Scene(scene_cfg, device)
+  model = scene.compile()
+  sim_cfg = SimulationCfg(njmax=20)
+  sim = Simulation(num_envs=1, cfg=sim_cfg, model=model, device=device)
+  scene.initialize(sim.mj_model, sim.model, sim.data)
+
+  sensor = scene["robot/joint1_pos"]
+  dt = sim.mj_model.opt.timestep
+
+  # Track _read() calls by counting outdated flag changes.
+  sim.step()
+  scene.update(dt)
+
+  # First access triggers _read().
+  assert sensor._is_outdated
+  _ = sensor.data
+  assert not sensor._is_outdated
+
+  # Step 40 times (< update_period), sensor should stay cached.
+  for _ in range(40):
+    sim.step()
+    scene.update(dt)
+
+  # Should still be cached (not outdated).
+  assert not sensor._is_outdated
+
+  # Step 20 more times (> update_period), sensor should be marked outdated.
+  for _ in range(20):
+    sim.step()
+    scene.update(dt)
+
+  # Should be outdated now.
+  assert sensor._is_outdated

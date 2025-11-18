@@ -14,12 +14,13 @@ _DEFAULT_PLANE_TEXTURE = spec_cfg.TextureCfg(
   name="groundplane",
   type="2d",
   builtin="checker",
-  mark="edge",
   rgb1=(0.2, 0.3, 0.4),
   rgb2=(0.1, 0.2, 0.3),
-  markrgb=(0.8, 0.8, 0.8),
   width=300,
   height=300,
+  # NOTE: These don't render nicely with the CameraSensor.
+  # markrgb=(0.8, 0.8, 0.8),
+  # mark="edge",
 )
 
 _DEFAULT_PLANE_MATERIAL = spec_cfg.MaterialCfg(

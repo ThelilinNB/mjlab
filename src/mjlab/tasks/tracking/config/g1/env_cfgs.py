@@ -7,7 +7,7 @@ from mjlab.asset_zoo.robots import (
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.manager_term_config import ObservationGroupCfg
-from mjlab.sensor import ContactMatch, ContactSensorCfg
+from mjlab.sensor import CameraSensorCfg, ContactMatch, ContactSensorCfg
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
 
@@ -96,5 +96,27 @@ def unitree_g1_flat_tracking_env_cfg(
     motion_cmd.velocity_range = {}
 
     motion_cmd.sampling_mode = "start"
+
+  # 16:9 aspect ratio camera.
+  width = 128
+  height = int(width * 9 / 16)
+  dt = 1.0 / 20.0
+  depth_camera_cfg = CameraSensorCfg(
+    name="depth",
+    camera_name="robot/depth",
+    width=width,
+    height=height,
+    type=("depth",),
+    update_period=dt,
+  )
+  rgb_camera_cfg = CameraSensorCfg(
+    name="rgb",
+    camera_name="robot/tracking",
+    width=width,
+    height=height,
+    type=("rgb",),
+    update_period=dt,
+  )
+  cfg.scene.sensors = cfg.scene.sensors + (depth_camera_cfg, rgb_camera_cfg)
 
   return cfg

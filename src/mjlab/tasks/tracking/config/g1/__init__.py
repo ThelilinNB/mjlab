@@ -1,7 +1,9 @@
 from mjlab.tasks.registry import register_mjlab_task
 from mjlab.tasks.tracking.rl import MotionTrackingOnPolicyRunner
 
-from .env_cfgs import unitree_g1_flat_tracking_env_cfg
+from .env_cfgs import (
+  unitree_g1_flat_tracking_env_cfg,
+)
 from .rl_cfg import unitree_g1_tracking_ppo_runner_cfg
 
 register_mjlab_task(
