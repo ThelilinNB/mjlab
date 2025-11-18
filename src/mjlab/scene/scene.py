@@ -131,7 +131,9 @@ class Scene:
 
     camera_sensors = [s for s in self._sensors.values() if isinstance(s, CameraSensor)]
     if camera_sensors:
-      self._render_manager = RenderManager(mj_model, model, data, camera_sensors)
+      self._render_manager = RenderManager(
+        mj_model, model, data, camera_sensors, self._device
+      )
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
     for ent in self._entities.values():

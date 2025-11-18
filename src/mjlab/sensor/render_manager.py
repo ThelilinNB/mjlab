@@ -28,26 +28,17 @@ def _unpack_rgb_kernel(
 class RenderManager:
   """Manages rendering for all camera sensors in a scene.
 
-  The RenderManager coordinates rendering across multiple camera sensors using
-  a two-level control system:
+  Coordinates rendering across multiple camera sensors using a 2-level control system:
 
   1. **Static enablement (cam_active)**: Only cameras with corresponding sensors
-     are included in the render context at initialization. This determines the set
-     of cameras that CAN be rendered.
+    are included in the render context at initialization. This determines the set
+    of cameras that CAN be rendered. This is useful for scenarios where an XML file
+    may contain many cameras, but only a subset are used as sensors. In this case,
+    the other cameras are disabled.
 
   2. **Dynamic toggle (render_rgb/render_depth)**: On each render() call, these
-     flags control which enabled cameras ACTUALLY render based on their
-     update_period, allowing efficient selective rendering.
-
-  Update flow:
-    - Sensors mark themselves as outdated based on their update_period
-    - When sensor.data is accessed, it checks if outdated and calls _read()
-    - _read() calls RenderManager.get_rgb()/get_depth()
-    - RenderManager.render() checks which sensors are outdated and sets flags
-    - Only outdated sensors render; outputs are cached until next update
-
-  Important constraints:
-    - All cameras must share the same render settings (textures, shadows, geom groups)
+    flags control which enabled cameras ACTUALLY render based on their
+    update_period, allowing selective rendering.
   """
 
   def __init__(
@@ -56,12 +47,9 @@ class RenderManager:
     model: mjwarp.Model,
     data: mjwarp.Data,
     camera_sensors: list[CameraSensor],
+    device: str,
   ):
-    self.wp_device = (
-      model.struct.device  # type: ignore
-      if hasattr(model.struct, "device")  # type: ignore
-      else wp.get_device()
-    )
+    self.wp_device = wp.get_device(device)
 
     # Sort sensors by camera index to match mujoco_warp ordering.
     self.camera_sensors = sorted(camera_sensors, key=lambda s: s.camera_idx)
@@ -75,7 +63,6 @@ class RenderManager:
     }
 
     # Validate that all sensors have consistent rendering settings.
-    # mujoco_warp's render context is shared across all cameras, so they must agree.
     first_sensor = self.camera_sensors[0]
     use_textures = first_sensor.cfg.use_textures
     use_shadows = first_sensor.cfg.use_shadows
@@ -84,13 +71,15 @@ class RenderManager:
     for sensor in self.camera_sensors[1:]:
       if sensor.cfg.use_textures != use_textures:
         raise ValueError(
-          f"Camera sensor '{sensor.cfg.name}' has use_textures={sensor.cfg.use_textures}, "
+          f"Camera sensor '{sensor.cfg.name}' has "
+          f"use_textures={sensor.cfg.use_textures}, "
           f"but '{first_sensor.cfg.name}' has use_textures={use_textures}. "
           "All camera sensors must have the same use_textures setting."
         )
       if sensor.cfg.use_shadows != use_shadows:
         raise ValueError(
-          f"Camera sensor '{sensor.cfg.name}' has use_shadows={sensor.cfg.use_shadows}, "
+          f"Camera sensor '{sensor.cfg.name}' has "
+          f"use_shadows={sensor.cfg.use_shadows}, "
           f"but '{first_sensor.cfg.name}' has use_shadows={use_shadows}. "
           "All camera sensors must have the same use_shadows setting."
         )
@@ -129,6 +118,8 @@ class RenderManager:
     self._depth_adr = self._ctx.depth_adr.numpy()
     self._rgb_size = self._ctx.rgb_size.numpy()
     self._depth_size = self._ctx.depth_size.numpy()
+    self._render_rgb_torch = wp.to_torch(self._ctx.render_rgb)
+    self._render_depth_torch = wp.to_torch(self._ctx.render_depth)
 
     if any(render_rgb):
       self._rgb_unpacked = wp.array3d(
@@ -156,44 +147,24 @@ class RenderManager:
         self.render_graph = capture.graph
 
   def render(self, dt: float = 0.0) -> None:
-    """Execute rendering for all cameras that need updates.
-
-    This method is called by the scene/simulation loop. It checks which sensors
-    are outdated (based on their update_period) and only renders those cameras.
-
-    The render context maintains toggle flags (render_rgb, render_depth) that
-    control which cameras actually render on this call, enabling efficient
-    selective rendering when sensors have different update rates.
-
-    Optimization: If no cameras need updates, the entire render call is skipped.
-
-    Args:
-      dt: Time delta (currently unused, kept for API compatibility).
-    """
     del dt
 
     any_render_needed = False
     any_rgb_rendered = False
-
-    # Get numpy views (zero-copy - shares memory with warp arrays)
-    render_rgb_np = self._ctx.render_rgb.numpy()
-    render_depth_np = self._ctx.render_depth.numpy()
 
     for idx, sensor in enumerate(self.camera_sensors):
       should_render = sensor._is_outdated
       should_render_rgb = should_render and ("rgb" in sensor.cfg.type)
       should_render_depth = should_render and ("depth" in sensor.cfg.type)
 
-      # Modify via numpy view - changes are reflected in warp array
-      render_rgb_np[idx] = should_render_rgb
-      render_depth_np[idx] = should_render_depth
+      self._render_rgb_torch[idx] = should_render_rgb
+      self._render_depth_torch[idx] = should_render_depth
 
       if should_render_rgb or should_render_depth:
         any_render_needed = True
       if should_render_rgb:
         any_rgb_rendered = True
 
-    # Skip rendering entirely if no cameras need updates.
     if not any_render_needed:
       return
 
@@ -203,7 +174,6 @@ class RenderManager:
       else:
         mjwarp.render(self._model, self._data, self._ctx)
 
-    # Only unpack RGB if at least one RGB camera was rendered this frame.
     if any_rgb_rendered and self._rgb_unpacked is not None:
       wp.launch(
         _unpack_rgb_kernel,
@@ -214,18 +184,6 @@ class RenderManager:
       )
 
   def get_rgb(self, cam_idx: int) -> torch.Tensor:
-    """Get RGB image data for a specific camera.
-
-    Args:
-      cam_idx: MuJoCo camera ID (not the index in the sensor list).
-
-    Returns:
-      RGB image tensor of shape [num_envs, height, width, 3] (uint8).
-
-    Raises:
-      RuntimeError: If RGB rendering is not enabled for this RenderManager.
-      KeyError: If cam_idx is not a valid camera ID in this RenderManager.
-    """
     if self._rgb_unpacked is None:
       raise RuntimeError(
         "RGB rendering is not enabled. Ensure at least one camera sensor has "
@@ -253,18 +211,6 @@ class RenderManager:
     )
 
   def get_depth(self, cam_idx: int) -> torch.Tensor:
-    """Get depth image data for a specific camera.
-
-    Args:
-      cam_idx: MuJoCo camera ID (not the index in the sensor list).
-
-    Returns:
-      Depth image tensor of shape [num_envs, height, width, 1] (float32).
-
-    Raises:
-      RuntimeError: If depth rendering is not enabled for this RenderManager.
-      KeyError: If cam_idx is not a valid camera ID in this RenderManager.
-    """
     if not any(self._render_depth):
       raise RuntimeError(
         "Depth rendering is not enabled. Ensure at least one camera sensor has "

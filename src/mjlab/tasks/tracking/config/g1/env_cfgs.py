@@ -98,16 +98,16 @@ def unitree_g1_flat_tracking_env_cfg(
     motion_cmd.sampling_mode = "start"
 
   # 16:9 aspect ratio camera.
-  # Let's use a width of 256.
-  width = 256
+  width = 128
   height = int(width * 9 / 16)
+  dt = 1.0 / 20.0
   depth_camera_cfg = CameraSensorCfg(
     name="depth",
     camera_name="robot/depth",
     width=width,
     height=height,
     type=("depth",),
-    update_period=1.0 / 30.0,
+    update_period=dt,
   )
   rgb_camera_cfg = CameraSensorCfg(
     name="rgb",
@@ -115,7 +115,7 @@ def unitree_g1_flat_tracking_env_cfg(
     width=width,
     height=height,
     type=("rgb",),
-    update_period=1.0,
+    update_period=dt,
   )
   cfg.scene.sensors = cfg.scene.sensors + (depth_camera_cfg, rgb_camera_cfg)
 

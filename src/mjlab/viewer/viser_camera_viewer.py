@@ -22,33 +22,33 @@ class ViserCameraViewer:
     """Initialize the camera viewer.
 
     Args:
-        server: The Viser server instance
-        camera_sensor: The camera sensor to visualize
+      server: The Viser server instance
+      camera_sensor: The camera sensor to visualize
     """
     self._server = server
     self._camera_sensor = camera_sensor
 
-    # Image handles
     self._rgb_handle: viser.GuiImageHandle | None = None
     self._depth_handle: viser.GuiImageHandle | None = None
 
     self._camera_name = camera_sensor.camera_name
 
-    # Determine what types of images to display
     self._has_rgb = "rgb" in self._camera_sensor.cfg.type
     self._has_depth = "depth" in self._camera_sensor.cfg.type
 
-    # Create image display handles
+    height = self._camera_sensor.cfg.height
+    width = self._camera_sensor.cfg.width
+
     if self._has_rgb:
       self._rgb_handle = self._server.gui.add_image(
-        image=np.zeros((480, 640, 3), dtype=np.uint8),
+        image=np.zeros((height, width, 3), dtype=np.uint8),
         label=f"{self._camera_name}_rgb",
         format="jpeg",
       )
 
     if self._has_depth:
       self._depth_handle = self._server.gui.add_image(
-        image=np.zeros((480, 640), dtype=np.uint8),
+        image=np.zeros((height, width), dtype=np.uint8),
         label=f"{self._camera_name}_depth",
         format="jpeg",
       )
@@ -57,7 +57,7 @@ class ViserCameraViewer:
     """Update the camera images for a single environment.
 
     Args:
-        env_idx: Environment index to visualize
+      env_idx: Environment index to visualize
     """
     data = self._camera_sensor.data
 
