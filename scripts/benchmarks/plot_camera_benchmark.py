@@ -49,6 +49,7 @@ def plot_grouped_bars(
   has_baseline: bool,
   device_name: str,
   figsize: tuple[float, float] = (16, 6),
+  plot_overhead: bool = False,
 ) -> tuple:
   """Create grouped bar chart visualization.
 
@@ -57,23 +58,41 @@ def plot_grouped_bars(
     has_baseline: Whether baseline data is included
     device_name: Name of the device used for benchmarking
     figsize: Figure size in inches (width, height)
+    plot_overhead: Whether to include overhead plot
 
   Returns:
     Tuple of (fig, axes)
   """
-  # Prepare data - convert to throughput (env-steps per second)
+  # Prepare data - convert to throughput (env-steps per second and physics-steps per second)
   df_plot = df.copy()
   df_plot["throughput"] = df_plot["num_envs"] * 1000.0 / df_plot["per_step_ms_mean"]
   df_plot["throughput_min"] = df_plot["num_envs"] * 1000.0 / df_plot["per_step_ms_max"]
   df_plot["throughput_max"] = df_plot["num_envs"] * 1000.0 / df_plot["per_step_ms_min"]
 
+  # Physics throughput (multiply by decimation if available)
+  if "decimation" in df_plot.columns:
+    df_plot["physics_throughput"] = df_plot["throughput"] * df_plot["decimation"]
+    df_plot["physics_throughput_min"] = (
+      df_plot["throughput_min"] * df_plot["decimation"]
+    )
+    df_plot["physics_throughput_max"] = (
+      df_plot["throughput_max"] * df_plot["decimation"]
+    )
+  else:
+    df_plot["physics_throughput"] = df_plot["throughput"]
+    df_plot["physics_throughput_min"] = df_plot["throughput_min"]
+    df_plot["physics_throughput_max"] = df_plot["throughput_max"]
+
   # Get unique values
   num_envs_list = sorted(df_plot["num_envs"].unique())
 
-  if has_baseline:
+  if has_baseline and plot_overhead:
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+  else:
+    fig, ax1 = plt.subplots(1, 1, figsize=(10, 6))
 
-    # Left plot: FPS comparison with baseline
+  if has_baseline:
+    # Throughput comparison with baseline
     # Separate baseline and camera data
     df_baseline = df_plot[df_plot["camera_type"] == "baseline"]
     df_camera = df_plot[df_plot["camera_type"] != "baseline"]
@@ -94,16 +113,16 @@ def plot_grouped_bars(
     # Define consistent color palette for resolutions
     colors = plt.cm.viridis(np.linspace(0.2, 0.9, len(resolutions)))  # type: ignore[attr-defined]
 
-    # Plot baseline
+    # Plot baseline (using physics throughput)
     baseline_throughput = []
     baseline_err = []
     for num_env in num_envs_list:
       row = df_baseline[df_baseline["num_envs"] == num_env].iloc[0]
-      baseline_throughput.append(row["throughput"])
+      baseline_throughput.append(row["physics_throughput"])
       baseline_err.append(
         [
-          row["throughput"] - row["throughput_min"],
-          row["throughput_max"] - row["throughput"],
+          row["physics_throughput"] - row["physics_throughput_min"],
+          row["physics_throughput_max"] - row["physics_throughput"],
         ]
       )
 
@@ -133,11 +152,11 @@ def plot_grouped_bars(
           row = df_res[df_res["num_envs"] == num_env]
           if not row.empty:
             row = row.iloc[0]
-            throughput_vals.append(row["throughput"])
+            throughput_vals.append(row["physics_throughput"])
             throughput_err.append(
               [
-                row["throughput"] - row["throughput_min"],
-                row["throughput_max"] - row["throughput"],
+                row["physics_throughput"] - row["physics_throughput_min"],
+                row["physics_throughput_max"] - row["physics_throughput"],
               ]
             )
           else:
@@ -159,7 +178,7 @@ def plot_grouped_bars(
         )
 
     ax1.set_xlabel("Number of Environments", fontsize=12, fontweight="bold")
-    ax1.set_ylabel("Throughput (env-steps/sec)", fontsize=12, fontweight="bold")
+    ax1.set_ylabel("Throughput (physics-steps/sec)", fontsize=12, fontweight="bold")
     ax1.set_title("Throughput Comparison", fontsize=14, fontweight="bold")
     ax1.set_xticks(x)
     ax1.set_xticklabels(num_envs_list)
@@ -167,8 +186,8 @@ def plot_grouped_bars(
     ax1.legend(fontsize=9, loc="best")
     ax1.grid(True, alpha=0.3, axis="y")
 
-    # Right plot: Overhead percentage as grouped bars
-    if "overhead_pct" in df.columns:
+    # Right plot: Overhead percentage as grouped bars (only if plot_overhead is True)
+    if plot_overhead and "overhead_pct" in df.columns:
       df_overhead = df_camera.copy()
 
       for i, resolution in enumerate(resolutions):
@@ -241,11 +260,11 @@ def plot_grouped_bars(
           row = df_res[df_res["num_envs"] == num_env]
           if not row.empty:
             row = row.iloc[0]
-            throughput_vals.append(row["throughput"])
+            throughput_vals.append(row["physics_throughput"])
             throughput_err.append(
               [
-                row["throughput"] - row["throughput_min"],
-                row["throughput_max"] - row["throughput"],
+                row["physics_throughput"] - row["physics_throughput_min"],
+                row["physics_throughput_max"] - row["physics_throughput"],
               ]
             )
           else:
@@ -267,7 +286,7 @@ def plot_grouped_bars(
         )
 
     ax1.set_xlabel("Number of Environments", fontsize=12, fontweight="bold")
-    ax1.set_ylabel("Throughput (env-steps/sec)", fontsize=12, fontweight="bold")
+    ax1.set_ylabel("Throughput (physics-steps/sec)", fontsize=12, fontweight="bold")
     ax1.set_title("Camera Sensor Throughput", fontsize=14, fontweight="bold")
     ax1.set_xticks(x)
     ax1.set_xticklabels(num_envs_list)
@@ -285,6 +304,7 @@ def plot_heatmap(
   has_baseline: bool,
   device_name: str,
   figsize: tuple[float, float] = (14, 6),
+  plot_overhead: bool = False,
 ) -> tuple:
   """Create heatmap visualization.
 
@@ -302,18 +322,27 @@ def plot_heatmap(
   df_plot = df.copy()
   df_plot["throughput"] = df_plot["num_envs"] * 1000.0 / df_plot["per_step_ms_mean"]
 
+  # Physics throughput (multiply by decimation if available)
+  if "decimation" in df_plot.columns:
+    df_plot["physics_throughput"] = df_plot["throughput"] * df_plot["decimation"]
+  else:
+    df_plot["physics_throughput"] = df_plot["throughput"]
+
   # Separate camera data (exclude baseline)
   df_camera = df_plot[df_plot["camera_type"] != "baseline"]
 
   if df_camera.empty:
     # Fall back to grouped bars if no camera data
-    return plot_grouped_bars(df, has_baseline, device_name, figsize)
+    return plot_grouped_bars(df, has_baseline, device_name, figsize, plot_overhead)
 
   camera_types = sorted(df_camera["camera_type"].unique())
 
-  if has_baseline:
+  if has_baseline and plot_overhead:
     # Create figure with subplots for each camera type + overhead
     n_plots = len(camera_types) + 1
+  elif has_baseline:
+    # Create figure with subplots for each camera type only
+    n_plots = len(camera_types)
     fig, axes = plt.subplots(1, n_plots, figsize=(6 * n_plots, 5))
 
     if n_plots == 1:
@@ -323,9 +352,9 @@ def plot_heatmap(
     for idx, camera_type in enumerate(camera_types):
       df_cam = df_camera[df_camera["camera_type"] == camera_type]
 
-      # Pivot data for heatmap
+      # Pivot data for heatmap (use physics throughput)
       pivot_throughput = df_cam.pivot_table(
-        index="resolution", columns="num_envs", values="throughput"
+        index="resolution", columns="num_envs", values="physics_throughput"
       )
 
       im = axes[idx].imshow(pivot_throughput.values, cmap="RdYlGn", aspect="auto")
@@ -358,10 +387,10 @@ def plot_heatmap(
 
       # Add colorbar
       cbar = plt.colorbar(im, ax=axes[idx])
-      cbar.set_label("Throughput (env-steps/sec)", fontsize=10)
+      cbar.set_label("Throughput (physics-steps/sec)", fontsize=10)
 
-    # Plot overhead heatmap
-    if "overhead_pct" in df.columns and len(camera_types) > 0:
+    # Plot overhead heatmap (only if plot_overhead is True)
+    if plot_overhead and "overhead_pct" in df.columns and len(camera_types) > 0:
       df_overhead = df_camera.copy()
 
       # Take first camera type for overhead visualization
@@ -411,7 +440,7 @@ def plot_heatmap(
       df_cam = df_camera[df_camera["camera_type"] == camera_type]
 
       pivot_throughput = df_cam.pivot_table(
-        index="resolution", columns="num_envs", values="throughput"
+        index="resolution", columns="num_envs", values="physics_throughput"
       )
 
       im = axes[idx].imshow(pivot_throughput.values, cmap="RdYlGn", aspect="auto")
@@ -441,7 +470,7 @@ def plot_heatmap(
       )
 
       cbar = plt.colorbar(im, ax=axes[idx])
-      cbar.set_label("Throughput (env-steps/sec)", fontsize=10)
+      cbar.set_label("Throughput (physics-steps/sec)", fontsize=10)
 
     fig.suptitle(f"Device: {device_name}", fontsize=12, y=0.98)
 
@@ -453,6 +482,7 @@ def plot_faceted(
   has_baseline: bool,
   device_name: str,
   figsize: tuple[float, float] = (16, 10),
+  plot_overhead: bool = False,
 ) -> tuple:
   """Create faceted subplot visualization.
 
@@ -470,10 +500,24 @@ def plot_faceted(
   df_plot["throughput_min"] = df_plot["num_envs"] * 1000.0 / df_plot["per_step_ms_max"]
   df_plot["throughput_max"] = df_plot["num_envs"] * 1000.0 / df_plot["per_step_ms_min"]
 
+  # Physics throughput (multiply by decimation if available)
+  if "decimation" in df_plot.columns:
+    df_plot["physics_throughput"] = df_plot["throughput"] * df_plot["decimation"]
+    df_plot["physics_throughput_min"] = (
+      df_plot["throughput_min"] * df_plot["decimation"]
+    )
+    df_plot["physics_throughput_max"] = (
+      df_plot["throughput_max"] * df_plot["decimation"]
+    )
+  else:
+    df_plot["physics_throughput"] = df_plot["throughput"]
+    df_plot["physics_throughput_min"] = df_plot["throughput_min"]
+    df_plot["physics_throughput_max"] = df_plot["throughput_max"]
+
   df_camera = df_plot[df_plot["camera_type"] != "baseline"]
 
   if df_camera.empty:
-    return plot_grouped_bars(df, has_baseline, device_name, figsize)
+    return plot_grouped_bars(df, has_baseline, device_name, figsize, plot_overhead)
 
   resolutions = sorted(df_camera["resolution"].unique())
   camera_types = sorted(df_camera["camera_type"].unique())
@@ -496,10 +540,10 @@ def plot_faceted(
       if not df_cam.empty:
         ax.errorbar(  # type: ignore[union-attr]
           df_cam["num_envs"],
-          df_cam["throughput"],
+          df_cam["physics_throughput"],
           yerr=[
-            df_cam["throughput"] - df_cam["throughput_min"],
-            df_cam["throughput_max"] - df_cam["throughput"],
+            df_cam["physics_throughput"] - df_cam["physics_throughput_min"],
+            df_cam["physics_throughput_max"] - df_cam["physics_throughput"],
           ],
           marker="o",
           linewidth=2.5,
@@ -517,10 +561,10 @@ def plot_faceted(
       if not df_baseline.empty:
         ax.errorbar(  # type: ignore[union-attr]
           df_baseline["num_envs"],
-          df_baseline["throughput"],
+          df_baseline["physics_throughput"],
           yerr=[
-            df_baseline["throughput"] - df_baseline["throughput_min"],
-            df_baseline["throughput_max"] - df_baseline["throughput"],
+            df_baseline["physics_throughput"] - df_baseline["physics_throughput_min"],
+            df_baseline["physics_throughput_max"] - df_baseline["physics_throughput"],
           ],
           marker="s",
           linewidth=2.5,
@@ -533,7 +577,7 @@ def plot_faceted(
         )
 
     ax.set_xlabel("Number of Environments", fontsize=10, fontweight="bold")  # type: ignore[union-attr]
-    ax.set_ylabel("Throughput (env-steps/sec)", fontsize=10, fontweight="bold")  # type: ignore[union-attr]
+    ax.set_ylabel("Throughput (physics-steps/sec)", fontsize=10, fontweight="bold")  # type: ignore[union-attr]
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(format_large_number))  # type: ignore[union-attr]
     ax.set_title(f"Resolution: {resolution}", fontsize=11, fontweight="bold")  # type: ignore[union-attr]
     ax.legend(fontsize=9)  # type: ignore[union-attr]
@@ -554,6 +598,7 @@ def generate_plot(
   output_path: Path | None = None,
   style: Literal["grouped_bar", "heatmap", "faceted", "all"] = "grouped_bar",
   figsize: tuple[float, float] = (16, 6),
+  plot_overhead: bool = False,
 ) -> None:
   """Generate visualization from benchmark CSV data.
 
@@ -588,21 +633,21 @@ def generate_plot(
     base_path = csv_path.with_suffix("")
 
     # Grouped bar chart
-    fig, _ = plot_grouped_bars(df, has_baseline, device_name, figsize)
+    fig, _ = plot_grouped_bars(df, has_baseline, device_name, figsize, plot_overhead)
     out_path = Path(str(base_path) + "_grouped_bar.png")
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"Grouped bar plot saved to: {out_path}")
 
     # Heatmap
-    fig, _ = plot_heatmap(df, has_baseline, device_name, (14, 6))
+    fig, _ = plot_heatmap(df, has_baseline, device_name, (14, 6), plot_overhead)
     out_path = Path(str(base_path) + "_heatmap.png")
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"Heatmap saved to: {out_path}")
 
     # Faceted
-    fig, _ = plot_faceted(df, has_baseline, device_name, (16, 10))
+    fig, _ = plot_faceted(df, has_baseline, device_name, (16, 10), plot_overhead)
     out_path = Path(str(base_path) + "_faceted.png")
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close()
@@ -615,11 +660,11 @@ def generate_plot(
 
     # Generate selected visualization
     if style == "grouped_bar":
-      fig, _ = plot_grouped_bars(df, has_baseline, device_name, figsize)
+      fig, _ = plot_grouped_bars(df, has_baseline, device_name, figsize, plot_overhead)
     elif style == "heatmap":
-      fig, _ = plot_heatmap(df, has_baseline, device_name, figsize)
+      fig, _ = plot_heatmap(df, has_baseline, device_name, figsize, plot_overhead)
     elif style == "faceted":
-      fig, _ = plot_faceted(df, has_baseline, device_name, figsize)
+      fig, _ = plot_faceted(df, has_baseline, device_name, figsize, plot_overhead)
     else:
       raise ValueError(f"Unknown style: {style}")
 
@@ -635,6 +680,7 @@ def main(
   style: Literal["grouped_bar", "heatmap", "faceted", "all"] = "grouped_bar",
   width: float = 16,
   height: float = 6,
+  plot_overhead: bool = False,
 ) -> None:
   """Plot camera sensor benchmark results from CSV.
 
@@ -644,12 +690,15 @@ def main(
     style: Visualization style (grouped_bar, heatmap, faceted, or all)
     width: Figure width in inches
     height: Figure height in inches
+    plot_overhead: Include overhead plot (only applies when baseline data is present)
   """
   if not csv_path.exists():
     print(f"Error: CSV file not found: {csv_path}")
     sys.exit(1)
 
-  generate_plot(csv_path, output, style=style, figsize=(width, height))
+  generate_plot(
+    csv_path, output, style=style, figsize=(width, height), plot_overhead=plot_overhead
+  )
 
 
 if __name__ == "__main__":

@@ -62,7 +62,10 @@ class BenchmarkConfig:
   include_baseline: bool = True
   """Include baseline benchmark without camera sensors for comparison."""
 
-  num_runs: int = 3
+  plot_overhead: bool = False
+  """Include overhead plot in visualization (only applies when include_baseline=True)."""
+
+  num_runs: int = 1
   """Number of runs per configuration to measure variance."""
 
   steps: int = 200
@@ -105,7 +108,7 @@ def create_env_with_camera(
   width: int,
   camera_type: Literal["rgb", "depth"] | None,
   device: str,
-) -> ManagerBasedRlEnv:
+) -> tuple[ManagerBasedRlEnv, int]:
   """Create tracking environment with optional camera sensor.
 
   Args:
@@ -116,7 +119,7 @@ def create_env_with_camera(
     device: Device to run on
 
   Returns:
-    Configured environment
+    Tuple of (configured environment, decimation)
   """
   # Get base tracking env config (use play=True for simpler setup)
   env_cfg = load_env_cfg("Mjlab-Tracking-Flat-Unitree-G1", play=True)
@@ -140,9 +143,10 @@ def create_env_with_camera(
   # Add camera sensor if requested (otherwise baseline without camera)
   if camera_type is not None:
     dt = 1.0 / 20.0  # 20 Hz update rate
+    # Use robot/depth camera for both rgb and depth (just change the type)
     camera_cfg = CameraSensorCfg(
       name=f"{camera_type}_camera",
-      camera_name=f"robot/{camera_type}",
+      camera_name="robot/depth",
       width=width,
       height=height,
       type=(camera_type,),
@@ -152,10 +156,13 @@ def create_env_with_camera(
 
   env_cfg.scene.sensors = sensors
 
+  # Get decimation from environment config
+  decimation = env_cfg.decimation
+
   # Create environment (suppress verbose output)
   with suppress_output():
     env = ManagerBasedRlEnv(cfg=env_cfg, device=device)
-  return env
+  return env, decimation
 
 
 def run_benchmark(
@@ -254,15 +261,18 @@ def main(config: BenchmarkConfig) -> None:
 
       # Run multiple times to measure variance
       run_results = []
+      decimation = None
       for _ in range(config.num_runs):
         # Create environment
-        env = create_env_with_camera(
+        env, env_decimation = create_env_with_camera(
           num_envs=num_envs,
           height=height,
           width=width,
           camera_type=camera_type,  # type: ignore
           device=config.device,
         )
+        if decimation is None:
+          decimation = env_decimation
 
         # Run benchmark
         result = run_benchmark(
@@ -288,6 +298,7 @@ def main(config: BenchmarkConfig) -> None:
         "resolution": resolution_str,
         "camera_type": camera_type_str,
         "device": device_name,
+        "decimation": decimation,
         "per_step_ms_mean": float(np.mean(per_step_times)),
         "per_step_ms_std": float(np.std(per_step_times)),
         "per_step_ms_min": float(np.min(per_step_times)),
@@ -360,7 +371,7 @@ def main(config: BenchmarkConfig) -> None:
   plot_path = (
     f"outputs/benchmarks/camera_sensor_{camera_suffix}_{resolution_suffix}.png"
   )
-  generate_visualization(df, config, device_name, plot_path)
+  generate_visualization(df, config, device_name, plot_path, config.plot_overhead)
   print(f"[INFO]: Visualization saved to {plot_path}")
 
 
@@ -376,7 +387,11 @@ def format_large_number(x: float, pos: int | None = None) -> str:
 
 
 def generate_visualization(
-  df: pd.DataFrame, config: BenchmarkConfig, device_name: str, output_path: str
+  df: pd.DataFrame,
+  config: BenchmarkConfig,
+  device_name: str,
+  output_path: str,
+  plot_overhead: bool = False,
 ) -> None:
   """Generate matplotlib visualization of benchmark results using grouped bar charts."""
   # Set clean style
@@ -390,20 +405,29 @@ def generate_visualization(
     }
   )
 
-  # Prepare data - convert to throughput (env-steps per second)
+  # Prepare data - convert to throughput (env-steps per second and physics-steps per second)
   df_plot = df.copy()
   df_plot["throughput"] = df_plot["num_envs"] * 1000.0 / df_plot["per_step_ms_mean"]
   df_plot["throughput_min"] = df_plot["num_envs"] * 1000.0 / df_plot["per_step_ms_max"]
   df_plot["throughput_max"] = df_plot["num_envs"] * 1000.0 / df_plot["per_step_ms_min"]
 
+  # Physics throughput (multiply by decimation)
+  df_plot["physics_throughput"] = df_plot["throughput"] * df_plot["decimation"]
+  df_plot["physics_throughput_min"] = df_plot["throughput_min"] * df_plot["decimation"]
+  df_plot["physics_throughput_max"] = df_plot["throughput_max"] * df_plot["decimation"]
+
   # Get unique values
   num_envs_list = sorted(df_plot["num_envs"].unique())
 
-  if config.include_baseline:
-    # Two subplots: FPS comparison and overhead
+  if config.include_baseline and plot_overhead:
+    # Two subplots: throughput comparison and overhead
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+  else:
+    # Single plot: throughput comparison only
+    fig, ax1 = plt.subplots(1, 1, figsize=(10, 6))
 
-    # Left plot: FPS comparison with baseline (grouped bar chart)
+  if config.include_baseline:
+    # Throughput comparison with baseline (grouped bar chart)
     # Separate baseline and camera data
     df_baseline = df_plot[df_plot["camera_type"] == "baseline"]
     df_camera = df_plot[df_plot["camera_type"] != "baseline"]
@@ -424,16 +448,16 @@ def generate_visualization(
     # Define consistent color palette for resolutions
     colors = plt.cm.viridis(np.linspace(0.2, 0.9, len(resolutions)))  # type: ignore[attr-defined]
 
-    # Plot baseline
+    # Plot baseline (using physics throughput)
     baseline_throughput = []
     baseline_err = []
     for num_env in num_envs_list:
       row = df_baseline[df_baseline["num_envs"] == num_env].iloc[0]
-      baseline_throughput.append(row["throughput"])
+      baseline_throughput.append(row["physics_throughput"])
       baseline_err.append(
         [
-          row["throughput"] - row["throughput_min"],
-          row["throughput_max"] - row["throughput"],
+          row["physics_throughput"] - row["physics_throughput_min"],
+          row["physics_throughput_max"] - row["physics_throughput"],
         ]
       )
 
@@ -463,11 +487,11 @@ def generate_visualization(
           row = df_res[df_res["num_envs"] == num_env]
           if not row.empty:
             row = row.iloc[0]
-            throughput_vals.append(row["throughput"])
+            throughput_vals.append(row["physics_throughput"])
             throughput_err.append(
               [
-                row["throughput"] - row["throughput_min"],
-                row["throughput_max"] - row["throughput"],
+                row["physics_throughput"] - row["physics_throughput_min"],
+                row["physics_throughput_max"] - row["physics_throughput"],
               ]
             )
           else:
@@ -489,7 +513,7 @@ def generate_visualization(
         )
 
     ax1.set_xlabel("Number of Environments", fontsize=12, fontweight="bold")
-    ax1.set_ylabel("Throughput (env-steps/sec)", fontsize=12, fontweight="bold")
+    ax1.set_ylabel("Throughput (physics-steps/sec)", fontsize=12, fontweight="bold")
     ax1.set_title("Throughput Comparison", fontsize=14, fontweight="bold")
     ax1.set_xticks(x)
     ax1.set_xticklabels(num_envs_list)
@@ -497,8 +521,8 @@ def generate_visualization(
     ax1.legend(fontsize=9, loc="best")
     ax1.grid(True, alpha=0.3, axis="y")
 
-    # Right plot: Overhead percentage as grouped bars
-    if "overhead_pct" in df.columns:
+    # Right plot: Overhead percentage as grouped bars (only if plot_overhead is True)
+    if plot_overhead and "overhead_pct" in df.columns:
       df_overhead = df_camera.copy()
 
       for i, resolution in enumerate(resolutions):
@@ -571,11 +595,11 @@ def generate_visualization(
           row = df_res[df_res["num_envs"] == num_env]
           if not row.empty:
             row = row.iloc[0]
-            throughput_vals.append(row["throughput"])
+            throughput_vals.append(row["physics_throughput"])
             throughput_err.append(
               [
-                row["throughput"] - row["throughput_min"],
-                row["throughput_max"] - row["throughput"],
+                row["physics_throughput"] - row["physics_throughput_min"],
+                row["physics_throughput_max"] - row["physics_throughput"],
               ]
             )
           else:
@@ -597,7 +621,7 @@ def generate_visualization(
         )
 
     ax1.set_xlabel("Number of Environments", fontsize=12, fontweight="bold")
-    ax1.set_ylabel("Throughput (env-steps/sec)", fontsize=12, fontweight="bold")
+    ax1.set_ylabel("Throughput (physics-steps/sec)", fontsize=12, fontweight="bold")
     ax1.set_title("Camera Sensor Throughput", fontsize=14, fontweight="bold")
     ax1.set_xticks(x)
     ax1.set_xticklabels(num_envs_list)
