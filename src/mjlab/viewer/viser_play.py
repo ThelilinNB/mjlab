@@ -223,10 +223,12 @@ class ViserPlayViewer(BaseViewer):
 
   def _update_status_display(self) -> None:
     """Update the HTML status display."""
+    fps_display = f"{self._smoothed_fps:.1f}" if self._smoothed_fps > 0 else "—"
     self._status_html.content = f"""
       <div style="font-size: 0.85em; line-height: 1.25; padding: 0 1em 0.5em 1em;">
         <strong>Status:</strong> {"Paused" if self._is_paused else "Running"}<br/>
         <strong>Steps:</strong> {self._step_count}<br/>
-        <strong>Speed:</strong> {self._time_multiplier:.0%}
+        <strong>Speed:</strong> {self._time_multiplier:.0%}<br/>
+        <strong>FPS:</strong> {fps_display}
       </div>
       """
