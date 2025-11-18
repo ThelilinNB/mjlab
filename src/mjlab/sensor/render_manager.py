@@ -31,8 +31,8 @@ class RenderManager:
   The RenderManager coordinates rendering across multiple camera sensors using
   a two-level control system:
 
-  1. **Static enablement (cam_user[0])**: Cameras with cam_user[0] == 1.0 are
-     included in the render context at initialization. This determines the set
+  1. **Static enablement (cam_active)**: Only cameras with corresponding sensors
+     are included in the render context at initialization. This determines the set
      of cameras that CAN be rendered.
 
   2. **Dynamic toggle (render_rgb/render_depth)**: On each render() call, these
@@ -102,6 +102,11 @@ class RenderManager:
           "All camera sensors must have the same enabled_geom_groups setting."
         )
 
+    # Build cam_active list: mark only cameras with sensors as active.
+    cam_active = [False] * mj_model.ncam
+    for sensor in self.camera_sensors:
+      cam_active[sensor.camera_idx] = True
+
     with wp.ScopedDevice(self.wp_device):
       self._ctx = mjwarp.create_render_context(
         mjm=mj_model,
@@ -113,6 +118,7 @@ class RenderManager:
         use_textures=use_textures,
         use_shadows=use_shadows,
         enabled_geom_groups=enabled_geom_groups,
+        cam_active=cam_active,
       )
 
     self._model = model
@@ -166,18 +172,26 @@ class RenderManager:
     """
     del dt
 
-    # Build toggle arrays based on which sensors need updating.
     any_render_needed = False
+    any_rgb_rendered = False
+
+    # Get numpy views (zero-copy - shares memory with warp arrays)
+    render_rgb_np = self._ctx.render_rgb.numpy()
+    render_depth_np = self._ctx.render_depth.numpy()
+
     for idx, sensor in enumerate(self.camera_sensors):
       should_render = sensor._is_outdated
-      render_rgb = should_render and ("rgb" in sensor.cfg.type)
-      render_depth = should_render and ("depth" in sensor.cfg.type)
+      should_render_rgb = should_render and ("rgb" in sensor.cfg.type)
+      should_render_depth = should_render and ("depth" in sensor.cfg.type)
 
-      self._ctx.render_rgb[idx] = render_rgb
-      self._ctx.render_depth[idx] = render_depth
+      # Modify via numpy view - changes are reflected in warp array
+      render_rgb_np[idx] = should_render_rgb
+      render_depth_np[idx] = should_render_depth
 
-      if render_rgb or render_depth:
+      if should_render_rgb or should_render_depth:
         any_render_needed = True
+      if should_render_rgb:
+        any_rgb_rendered = True
 
     # Skip rendering entirely if no cameras need updates.
     if not any_render_needed:
@@ -189,7 +203,8 @@ class RenderManager:
       else:
         mjwarp.render(self._model, self._data, self._ctx)
 
-    if self._render_rgb and self._rgb_unpacked is not None:
+    # Only unpack RGB if at least one RGB camera was rendered this frame.
+    if any_rgb_rendered and self._rgb_unpacked is not None:
       wp.launch(
         _unpack_rgb_kernel,
         dim=(self._data.nworld, self._ctx.rgb_data.shape[1]),

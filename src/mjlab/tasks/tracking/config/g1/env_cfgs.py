@@ -101,51 +101,22 @@ def unitree_g1_flat_tracking_env_cfg(
   # Let's use a width of 256.
   width = 256
   height = int(width * 9 / 16)
-  camera_cfg = CameraSensorCfg(
-    name="tracking_camera",
-    camera_name="robot/depth",  # Use existing camera in g1.xml (robot entity prepends)
-    width=width,
-    height=height,
-    type=(
-      "rgb",
-      "depth",
-    ),
-    update_period=0.033,  # ~30 Hz (physics_dt=0.005 means 200 Hz sim)
-  )
-  cfg.scene.sensors = cfg.scene.sensors + (camera_cfg,)
-
-  return cfg
-
-
-def unitree_g1_flat_tracking_env_cfg_with_camera(
-  has_state_estimation: bool = True,
-  play: bool = False,
-) -> ManagerBasedRlEnvCfg:
-  """Create Unitree G1 flat terrain tracking configuration with camera sensor."""
-  cfg = unitree_g1_flat_tracking_env_cfg(
-    has_state_estimation=has_state_estimation, play=play
-  )
-
-  # 16:9 aspect ratio camera.
-  width = 256
-  height = int(width * 9 / 16)
-  update_period = 1.0 / 30.0  # 30 Hz
-  camera_cfg = CameraSensorCfg(
-    name="tracking_camera",
+  depth_camera_cfg = CameraSensorCfg(
+    name="depth",
     camera_name="robot/depth",
     width=width,
     height=height,
-    type=(
-      "rgb",
-      "depth",
-    ),
-    update_period=update_period,
+    type=("depth",),
+    update_period=1.0 / 30.0,
   )
-  cfg.scene.sensors = cfg.scene.sensors + (camera_cfg,)
-
-  assert cfg.commands is not None
-  motion_cmd = cfg.commands["motion"]
-  assert isinstance(motion_cmd, MotionCommandCfg)
-  motion_cmd.sampling_mode = "uniform"
+  rgb_camera_cfg = CameraSensorCfg(
+    name="rgb",
+    camera_name="robot/tracking",
+    width=width,
+    height=height,
+    type=("rgb",),
+    update_period=1.0,
+  )
+  cfg.scene.sensors = cfg.scene.sensors + (depth_camera_cfg, rgb_camera_cfg)
 
   return cfg

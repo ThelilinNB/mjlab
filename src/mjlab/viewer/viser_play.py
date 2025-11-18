@@ -30,7 +30,7 @@ class ViserPlayViewer(BaseViewer):
   ) -> None:
     super().__init__(env, policy, frame_rate, verbosity)
     self._reward_plotter: ViserRewardPlotter | None = None
-    self._camera_viewer: ViserCameraViewer | None = None
+    self._camera_viewers: list[ViserCameraViewer] = []
 
   @override
   def setup(self) -> None:
@@ -126,16 +126,21 @@ class ViserPlayViewer(BaseViewer):
         ]
         self._reward_plotter = ViserRewardPlotter(self._server, term_names)
 
-    # Camera tab - check if there's a camera sensor
-    camera_sensor = None
-    for sensor in self.env.unwrapped.scene.sensors.values():
-      if isinstance(sensor, CameraSensor):
-        camera_sensor = sensor
-        break
+    # Camera tab - collect all camera sensors
+    camera_sensors = [
+      sensor
+      for sensor in self.env.unwrapped.scene.sensors.values()
+      if isinstance(sensor, CameraSensor)
+    ]
 
-    if camera_sensor is not None:
+    if camera_sensors:
       with tabs.add_tab("Camera", icon=viser.Icon.CAMERA):
-        self._camera_viewer = ViserCameraViewer(self._server, camera_sensor)
+        # Create a viewer for each camera sensor
+        self._camera_viewers = [
+          ViserCameraViewer(self._server, sensor) for sensor in camera_sensors
+        ]
+    else:
+      self._camera_viewers = []
 
     # Geom groups tab.
     self._scene.create_geom_groups_gui(tabs)
@@ -165,8 +170,9 @@ class ViserPlayViewer(BaseViewer):
         self._reward_plotter.update(terms)
 
     # Update camera images (sensor update_period handles rate limiting)
-    if self._camera_viewer is not None and not self._is_paused:
-      self._camera_viewer.update(self._scene.env_idx)
+    if self._camera_viewers and not self._is_paused:
+      for camera_viewer in self._camera_viewers:
+        camera_viewer.update(self._scene.env_idx)
 
     # Update debug visualizations if enabled
     if self._scene.debug_visualization_enabled and hasattr(
@@ -205,8 +211,8 @@ class ViserPlayViewer(BaseViewer):
     """Close the viewer and cleanup resources."""
     if self._reward_plotter:
       self._reward_plotter.cleanup()
-    if self._camera_viewer:
-      self._camera_viewer.cleanup()
+    for camera_viewer in self._camera_viewers:
+      camera_viewer.cleanup()
     self._threadpool.shutdown(wait=True)
     self._server.stop()
 
