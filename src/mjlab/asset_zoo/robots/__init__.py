@@ -4,6 +4,14 @@ from mjlab.asset_zoo.robots.unitree_g1.g1_constants import (
 from mjlab.asset_zoo.robots.unitree_g1.g1_constants import (
   get_g1_robot_cfg as get_g1_robot_cfg,
 )
+
+from mjlab.asset_zoo.robots.ymboy.ymboy_constants import (
+  Ymboy_ACTION_SCALE as Ymboy_ACTION_SCALE,
+)
+from mjlab.asset_zoo.robots.ymboy.ymboy_constants  import (
+  get_Ymboy_robot_cfg as get_Ymboy_robot_cfg,
+)
+
 from mjlab.asset_zoo.robots.unitree_go1.go1_constants import (
   GO1_ACTION_SCALE as GO1_ACTION_SCALE,
 )

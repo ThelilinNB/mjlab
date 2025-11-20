@@ -78,8 +78,6 @@ def unitree_g1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     r".*ankle_roll.*": 0.1,
     # Waist.
     r".*waist_yaw.*": 0.2,
-    r".*waist_roll.*": 0.08,
-    r".*waist_pitch.*": 0.1,
     # Arms.
     r".*shoulder_pitch.*": 0.15,
     r".*shoulder_roll.*": 0.15,
@@ -97,8 +95,6 @@ def unitree_g1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     r".*ankle_roll.*": 0.15,
     # Waist.
     r".*waist_yaw.*": 0.3,
-    r".*waist_roll.*": 0.08,
-    r".*waist_pitch.*": 0.2,
     # Arms.
     r".*shoulder_pitch.*": 0.5,
     r".*shoulder_roll.*": 0.2,
